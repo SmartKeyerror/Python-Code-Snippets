@@ -248,3 +248,59 @@ class MetaclassTemplate(type):
 
         return klass
 ```
+
+
+## 7. Use Exponential-Backoff with retry
+
+> Exponential backoff is an algorithm that uses feedback to multiplicatively decrease the rate of some process, in order to gradually find an acceptable rate. 
+
+When we use `requests` Python package to send a network request, or use gRPC to execute a remote procedure call, it may returns unexpected errors, GATEWAY TIMEOUT, ABORTED etc. if this network request is very significant, we need retry.
+
+Here is a gRPC retry with Exponential-Backoff algorithm:
+
+```python
+import time
+from grpc import StatusCode, RpcError
+
+
+# define retry times with different situation
+MAX_RETRIES_BY_CODE = {
+    StatusCode.INTERNAL: 1,
+    StatusCode.ABORTED: 3,
+    StatusCode.UNAVAILABLE: 5,
+    StatusCode.DEADLINE_EXCEEDED: 5
+}
+
+# define MIN and MAX sleeping seconds
+MIN_SLEEPING = 0.015625
+MAX_SLEEPING = 1.0
+
+
+class RetriesExceeded(Exception):
+    """docstring for RetriesExceeded"""
+    pass
+
+
+def retry(f):
+    def wraps(*args, **kwargs):
+        retries = 0
+        while True:
+            try:
+                return f(*args, **kwargs)
+            except RpcError as e:
+                # 使用e.code()获取响应码
+                code = e.code()
+                max_retries = MAX_RETRIES_BY_CODE.get(code)
+
+                if max_retries is None:
+                    raise e
+
+                if retries > max_retries:
+                    raise RetriesExceeded(e)
+
+                back_off = min(MIN_SLEEPING * 2 ** retries, MAX_SLEEPING)
+
+                retries += 1
+                time.sleep(back_off)
+    return wraps
+```
